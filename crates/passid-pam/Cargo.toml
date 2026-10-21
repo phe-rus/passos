@@ -1,0 +1,7 @@
+[package]
+name = "passid-pam"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]

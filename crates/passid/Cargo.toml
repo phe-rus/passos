@@ -1,0 +1,10 @@
+[package]
+name = "passid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2 = { version = "0.5", features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

@@ -1,0 +1,8 @@
+[package]
+name = "passidd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+passid = { path = "../passid" }
