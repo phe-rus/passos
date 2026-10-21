@@ -1,5 +1,5 @@
 [package]
-name = "pass-compositor"
+name = "pass-device"
 edition.workspace = true
 license.workspace = true
 version.workspace = true

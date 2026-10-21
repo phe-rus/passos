@@ -6,11 +6,12 @@ fn main() {
     println!("stored: {phc}\n");
 
     let mut state = LockoutState::default();
-    let mut now = 1_000u64;
 
-    for guess in [
+    let guesses = [
         "000000", "111222", "482916", "482917", "482918", "482919", "482915",
-    ] {
+    ];
+
+    for (now, guess) in (1_000u64..).zip(guesses) {
         match state.check(now) {
             Gate::Open => {
                 if passcode::verify(guess, &phc) {
@@ -21,9 +22,12 @@ fn main() {
                     println!("{guess}: wrong (failures={})", state.failures);
                 }
             }
-            Gate::Wait(s) => println!("{guess}: locked, wait {s}s"),
-            Gate::FallbackRequired => println!("{guess}: use password/passkey"),
+            Gate::Wait(seconds) => {
+                println!("{guess}: locked, wait {seconds}s");
+            }
+            Gate::FallbackRequired => {
+                println!("{guess}: use password/passkey");
+            }
         }
-        now += 1;
     }
 }
