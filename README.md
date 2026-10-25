@@ -29,7 +29,7 @@ Canonical release metadata is in `packages/release/usr/lib/passos/release`. The 
 - The image builder extracts the selected Debian kernel and initramfs and assembles a 3 GiB ext4 image.
 - ARM64 QEMU boot has reached `multi-user.target`, started systemd services and shown a serial login prompt.
 - Rust `init` creates an independent, persistent hostname in a specified *offline* root directory. It rejects `/`, preserves existing values, records an `unclaimed` provisioning state and tests restart recovery.
-- Eleven offline initialization tests are defined (pending verification of the latest changes on the development host). Code has passed Cargo formatting and Clippy checks.
+- Thirteen offline initialization tests are defined (pending verification of the latest changes on the development host). Code has passed Cargo formatting and Clippy checks.
 
 **Not yet implemented:** boot-time provisioning, account/owner creation, Passid linking, atomic updates, rollback, secure boot, disk encryption defaults, hardware-independent installer, or resource management. A login prompt does not mean a usable administrator account has been provisioned. Do not deploy this prototype as a production server.
 
