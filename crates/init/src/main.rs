@@ -59,7 +59,10 @@ fn reject_symlinks(root: &Path, relative: &str) -> io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    format!("Symbolic link in initialization path: {}", current.display()),
+                    format!(
+                        "Symbolic link in initialization path: {}",
+                        current.display()
+                    ),
                 ));
             }
             Ok(_) => {}
@@ -96,8 +99,12 @@ fn read_existing(path: &Path) -> io::Result<Option<String>> {
 // Publish a fully written file with hard_link rather than exposing a partial
 // destination. An interrupted run may leave an unused .tmp file behind.
 fn write_new(path: &Path, value: &str, mode: u32) -> io::Result<()> {
-    let parent = path.parent().ok_or_else(|| io::Error::other("Missing parent directory"))?;
-    let name = path.file_name().ok_or_else(|| io::Error::other("Missing filename"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("Missing parent directory"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("Missing filename"))?;
     let temp = parent.join(format!(
         ".{}.{}.tmp",
         name.to_string_lossy(),
@@ -105,7 +112,10 @@ fn write_new(path: &Path, value: &str, mode: u32) -> io::Result<()> {
     ));
 
     let result: io::Result<()> = (|| {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temp)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
         file.set_permissions(fs::Permissions::from_mode(mode))?;
         file.write_all(format!("{value}\n").as_bytes())?;
         file.sync_all()?;
@@ -204,7 +214,11 @@ fn initialize(root: &Path) -> io::Result<Device> {
         }
     };
 
-    Ok(Device { hostname, id, state })
+    Ok(Device {
+        hostname,
+        id,
+        state,
+    })
 }
 
 fn main() -> io::Result<()> {
