@@ -71,8 +71,7 @@ fn open_directory(root: &File, components: &[&str], create: bool) -> io::Result<
                     Ok(()) | Err(Errno::EXIST) => {}
                     Err(error) => return Err(filesystem_error(error)),
                 }
-                rfs::openat(&current, *name, flags, Mode::empty())
-                    .map_err(filesystem_error)?
+                rfs::openat(&current, *name, flags, Mode::empty()).map_err(filesystem_error)?
             }
             Err(error) => return Err(filesystem_error(error)),
         };
@@ -124,8 +123,8 @@ fn write_new(parent: &File, name: &str, value: &str, mode: u32) -> io::Result<()
     let temp = format!(".{name}.{}.tmp", random_uuid()?);
     let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
 
-    let fd = rfs::openat(parent, temp.as_str(), flags, Mode::from(mode))
-        .map_err(filesystem_error)?;
+    let fd =
+        rfs::openat(parent, temp.as_str(), flags, Mode::from(mode)).map_err(filesystem_error)?;
     let result: io::Result<()> = (|| {
         let mut file = File::from(fd);
         file.write_all(format!("{value}\n").as_bytes())?;
@@ -135,8 +134,7 @@ fn write_new(parent: &File, name: &str, value: &str, mode: u32) -> io::Result<()
         rfs::fsync(parent).map_err(filesystem_error)
     })();
 
-    let cleanup = rfs::unlinkat(parent, temp.as_str(), AtFlags::empty())
-        .map_err(filesystem_error);
+    let cleanup = rfs::unlinkat(parent, temp.as_str(), AtFlags::empty()).map_err(filesystem_error);
     if result.is_ok() {
         cleanup?;
         rfs::fsync(parent).map_err(filesystem_error)?;
