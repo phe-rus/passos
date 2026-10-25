@@ -54,7 +54,7 @@ fn generate_hostname() -> io::Result<String> {
 fn reject_symlinks(root: &Path, relative: &str) -> io::Result<()> {
     let mut current = root.to_path_buf();
     for component in Path::new(relative).components() {
-        current.push(component);
+        current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(io::Error::new(
