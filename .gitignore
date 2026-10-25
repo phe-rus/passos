@@ -1,28 +1,18 @@
-# Rust build artifacts
+# Cargo build output
 /target/
 
-# Generated operating system images
-/images/**/*.tar
-/images/**/*.xz
-/images/**/*.img
-/images/**/*.ext4
-/images/**/*.qcow2
-/images/**/*.iso
-/images/**/builds/
 # Generated OS images and boot artifacts
 /images/
 
-# Generated Debian packages
+# Built Debian packages
 /packages/dist/
 
-# Local testing
-/tests/init-fixture/
+# Local test roots created by init
+/tests/*-fixture/
 
-# Temporary files
+# Temporary and editor files
 *.tmp
 *.log
-
-# Editor files
 *.swp
 *.swo
 *~
