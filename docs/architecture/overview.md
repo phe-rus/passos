@@ -35,11 +35,13 @@ This does **not** establish an installation method for real Orange Pi hardware o
 
 - Reads and preserves a nonempty existing `etc/hostname`.
 - Otherwise generates a `pass-` hostname with ten hexadecimal characters derived from Linux's random UUID interface.
-- Writes a new hostname file using exclusive creation and synchronizes the file.
+- Reads and preserves a valid UUID in `var/lib/passos/device-id`, or creates one if absent.
+- Rejects empty hostname files and malformed existing device identifiers before writing new state.
+- Creates new files exclusively and synchronizes their contents.
 
-It has four tests covering creation, repeat invocation, empty existing hostname and refusal to initialize the live root.
+It has seven unit tests covering creation, repeat invocation, preservation, invalid existing values, UUID formatting and refusal to initialize the live root.
 
-The hostname is **not** a cryptographic device identifier, device ownership token or Passid identity. Current tests run on an offline fixture only.
+The UUID is **not** a cryptographic ownership credential, device key, hardware attestation or Passid identity. Device identity does not prove who owns a device. Initialization is still limited to an offline fixture, and creation is not yet a fully transactional or symlink-hardened operation.
 
 ## Planned identity and ownership
 
