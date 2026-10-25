@@ -1,3 +1,28 @@
-target/
-*.img
-*.img.xz
+# Rust build artifacts
+/target/
+
+# Generated operating system images
+/images/**/*.tar
+/images/**/*.xz
+/images/**/*.img
+/images/**/*.ext4
+/images/**/*.qcow2
+/images/**/*.iso
+/images/**/builds/
+# Generated OS images and boot artifacts
+/images/
+
+# Generated Debian packages
+/packages/dist/
+
+# Local testing
+/tests/init-fixture/
+
+# Temporary files
+*.tmp
+*.log
+
+# Editor files
+*.swp
+*.swo
+*~
