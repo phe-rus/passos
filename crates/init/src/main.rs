@@ -65,10 +65,7 @@ fn read_existing(path: &Path) -> io::Result<Option<String>> {
 }
 
 fn write_new(path: &Path, value: &str) -> io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(format!("{value}\n").as_bytes())?;
     file.sync_all()
 }
