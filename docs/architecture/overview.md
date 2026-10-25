@@ -33,15 +33,16 @@ This does **not** establish an installation method for real Orange Pi hardware o
 
 `crates/init` is a standalone Rust command accepting `--root <directory>`. It canonicalizes the destination, refuses the live root (`/`), then:
 
-- Reads and preserves a nonempty existing `etc/hostname`.
-- Otherwise generates a `pass-` hostname with ten hexadecimal characters derived from Linux's random UUID interface.
+- Reads and preserves a nonempty existing `etc/hostname`, or generates a `pass-` hostname.
 - Reads and preserves a valid UUID in `var/lib/passos/device-id`, or creates one if absent.
-- Rejects empty hostname files and malformed existing device identifiers before writing new state.
-- Creates new files exclusively and synchronizes their contents.
+- Writes `var/lib/passos/provisioning-state` as `unclaimed` only after the hostname and device ID exist.
+- Checks existing data for invalid values before writing new state; unrecognized provisioning states are rejected.
+- Rejects symbolic links in known offline target paths (including directories and files).
+- Publishes each new file after synchronizing its temporary contents, so an interrupted run can resume without accepting partial final files.
 
-It has seven unit tests covering creation, repeat invocation, preservation, invalid existing values, UUID formatting and refusal to initialize the live root.
+It has eleven unit tests, including restart recovery, invalid state and symlink rejection.
 
-The UUID is **not** a cryptographic ownership credential, device key, hardware attestation or Passid identity. Device identity does not prove who owns a device. Initialization is still limited to an offline fixture, and creation is not yet a fully transactional or symlink-hardened operation.
+The UUID is **not** a cryptographic ownership credential, device key, hardware attestation or Passid identity. Device identity does not prove ownership. The `unclaimed` state is informational, not an access-control boundary. Initialization remains offline-only. **Symlink checks are not race-free against concurrent untrusted filesystem changes**, and the multi-file operation is recoverable rather than fully transactional. Full directory-file-descriptor based operations, ownership enrollment and boot-time integration are still required.
 
 ## Planned identity and ownership
 
