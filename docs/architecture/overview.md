@@ -37,12 +37,14 @@ This does **not** establish an installation method for real Orange Pi hardware o
 - Reads and preserves a valid UUID in `var/lib/passos/device-id`, or creates one if absent.
 - Writes `var/lib/passos/provisioning-state` as `unclaimed` only after the hostname and device ID exist.
 - Checks existing data for invalid values before writing new state; unrecognized provisioning states are rejected.
-- Rejects symbolic links in known offline target paths (including directories and files).
-- Publishes each new file after synchronizing its temporary contents, so an interrupted run can resume without accepting partial final files.
+- Opens the offline root and traverses its directories using `rustix::fs::openat` with `O_NOFOLLOW` and `O_DIRECTORY`; subsequent operations use these opened directory handles.
+- Reads existing entries using no-follow file descriptors, rejecting non-regular files and oversized/invalid values.
+- Creates missing directories relative to open handles, then publishes fully synchronized temporary files using `linkat` so existing names are never silently replaced.
+- Applies restrictive modes to identity/state files and allows an interrupted run to resume.
 
-It has eleven unit tests, including restart recovery, invalid state and symlink rejection.
+It has thirteen unit tests, including restart recovery, invalid state, symlink rejection and private file permissions.
 
-The UUID is **not** a cryptographic ownership credential, device key, hardware attestation or Passid identity. Device identity does not prove ownership. The `unclaimed` state is informational, not an access-control boundary. Initialization remains offline-only. **Symlink checks are not race-free against concurrent untrusted filesystem changes**, and the multi-file operation is recoverable rather than fully transactional. Full directory-file-descriptor based operations, ownership enrollment and boot-time integration are still required.
+The UUID is **not** a cryptographic ownership credential, device key, hardware attestation or Passid identity. Device identity does not prove ownership. The `unclaimed` state is informational, not an access-control boundary. Initialization remains offline-only. Directory-relative operations protect child paths after opening the root, but the initial root selection and any concurrent privileged modifications still need an explicit threat model. The multi-file operation is recoverable rather than a fully atomic transaction. Ownership enrollment, concurrency policy and boot-time integration are still required.
 
 ## Planned identity and ownership
 
