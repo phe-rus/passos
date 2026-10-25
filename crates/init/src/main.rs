@@ -1,9 +1,13 @@
 use std::{
     env,
-    fs::{self, OpenOptions},
-    io::{self, Write},
-    os::unix::fs::PermissionsExt,
+    fs::{self, File},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
+};
+
+use rustix::{
+    fs::{self as rfs, AtFlags, Mode, OFlags},
+    io::Errno,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -13,29 +17,24 @@ struct Device {
     state: String,
 }
 
+fn valid_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
 fn random_uuid() -> io::Result<String> {
     let uuid = fs::read_to_string("/proc/sys/kernel/random/uuid")?;
     let uuid = uuid.trim();
-
     if !valid_uuid(uuid) {
         return Err(io::Error::other("Unable to generate a device identifier"));
     }
-
     Ok(uuid.to_owned())
-}
-
-fn valid_uuid(value: &str) -> bool {
-    if value.len() != 36 {
-        return false;
-    }
-
-    value.bytes().enumerate().all(|(index, byte)| {
-        if matches!(index, 8 | 13 | 18 | 23) {
-            byte == b'-'
-        } else {
-            byte.is_ascii_hexdigit()
-        }
-    })
 }
 
 fn generate_hostname() -> io::Result<String> {
@@ -45,91 +44,102 @@ fn generate_hostname() -> io::Result<String> {
         .filter(|character| character.is_ascii_hexdigit())
         .take(10)
         .collect();
-
     Ok(format!("pass-{suffix}"))
 }
 
-// Reject known symbolic links under the offline root. This is not yet
-// race-free against concurrent modifications by an untrusted process.
-fn reject_symlinks(root: &Path, relative: &str) -> io::Result<()> {
-    let mut current = root.to_path_buf();
-    for component in Path::new(relative).components() {
-        current.push(component.as_os_str());
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    format!(
-                        "Symbolic link in initialization path: {}",
-                        current.display()
-                    ),
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+fn filesystem_error(error: Errno) -> io::Error {
+    if error == Errno::LOOP || error == Errno::NOTDIR {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "A directory or file in the target path is unsafe",
+        )
+    } else {
+        error.into()
     }
-    Ok(())
 }
 
-fn read_existing(path: &Path) -> io::Result<Option<String>> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if !metadata.is_file() => {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!("Expected regular file: {}", path.display()),
-            ));
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+fn open_directory(root: &File, components: &[&str], create: bool) -> io::Result<Option<File>> {
+    let mut current = root.try_clone()?;
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+
+    for name in components {
+        let next = match rfs::openat(&current, *name, flags, Mode::empty()) {
+            Ok(fd) => fd,
+            Err(Errno::NOENT) if !create => return Ok(None),
+            Err(Errno::NOENT) => {
+                match rfs::mkdirat(&current, *name, Mode::from(0o700)) {
+                    Ok(()) | Err(Errno::EXIST) => {}
+                    Err(error) => return Err(filesystem_error(error)),
+                }
+                rfs::openat(&current, *name, flags, Mode::empty())
+                    .map_err(filesystem_error)?
+            }
+            Err(error) => return Err(filesystem_error(error)),
+        };
+        current = File::from(next);
     }
-    let contents = fs::read_to_string(path)?;
+
+    Ok(Some(current))
+}
+
+fn read_existing(parent: Option<&File>, name: &str) -> io::Result<Option<String>> {
+    let Some(parent) = parent else {
+        return Ok(None);
+    };
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let fd = match rfs::openat(parent, name, flags, Mode::empty()) {
+        Ok(fd) => fd,
+        Err(Errno::NOENT) => return Ok(None),
+        Err(error) => return Err(filesystem_error(error)),
+    };
+    let file = File::from(fd);
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Existing identity entry is not a regular file",
+        ));
+    }
+
+    let mut contents = String::new();
+    file.take(129).read_to_string(&mut contents)?;
+    if contents.len() > 128 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Existing identity entry is too large",
+        ));
+    }
     let value = contents.trim();
     if value.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Existing file is empty: {}", path.display()),
+            "Existing identity entry is empty",
         ));
     }
     Ok(Some(value.to_owned()))
 }
 
-// Publish a fully written file with hard_link rather than exposing a partial
-// destination. An interrupted run may leave an unused .tmp file behind.
-fn write_new(path: &Path, value: &str, mode: u32) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::other("Missing parent directory"))?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| io::Error::other("Missing filename"))?;
-    let temp = parent.join(format!(
-        ".{}.{}.tmp",
-        name.to_string_lossy(),
-        random_uuid()?
-    ));
+// Work relative to a previously opened directory descriptor. The final name
+// only appears after the temp file's contents are synced.
+fn write_new(parent: &File, name: &str, value: &str, mode: u32) -> io::Result<()> {
+    let temp = format!(".{name}.{}.tmp", random_uuid()?);
+    let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
 
+    let fd = rfs::openat(parent, temp.as_str(), flags, Mode::from(mode))
+        .map_err(filesystem_error)?;
     let result: io::Result<()> = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)?;
-        file.set_permissions(fs::Permissions::from_mode(mode))?;
+        let mut file = File::from(fd);
         file.write_all(format!("{value}\n").as_bytes())?;
         file.sync_all()?;
-        fs::hard_link(&temp, path)?;
-        fs::File::open(parent)?.sync_all()?;
-        Ok(())
+        rfs::linkat(parent, temp.as_str(), parent, name, AtFlags::empty())
+            .map_err(filesystem_error)?;
+        rfs::fsync(parent).map_err(filesystem_error)
     })();
 
-    // An abandoned temp file is harmless and can be removed after a crash.
-    match fs::remove_file(&temp) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) if result.is_ok() => return Err(error),
-        Err(_) => {}
+    let cleanup = rfs::unlinkat(parent, temp.as_str(), AtFlags::empty())
+        .map_err(filesystem_error);
+    if result.is_ok() {
+        cleanup?;
+        rfs::fsync(parent).map_err(filesystem_error)?;
     }
     result
 }
@@ -148,23 +158,22 @@ fn initialize(root: &Path) -> io::Result<Device> {
             "Live system initialization is not enabled",
         ));
     }
+    let root_fd = File::from(
+        rfs::open(
+            &root,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(filesystem_error)?,
+    );
 
-    for path in [
-        "etc/hostname",
-        "var/lib/passos/device-id",
-        "var/lib/passos/provisioning-state",
-    ] {
-        reject_symlinks(&root, path)?;
-    }
+    let etc = open_directory(&root_fd, &["etc"], false)?;
+    let state_dir = open_directory(&root_fd, &["var", "lib", "passos"], false)?;
 
-    let hostname_file = root.join("etc/hostname");
-    let id_file = root.join("var/lib/passos/device-id");
-    let state_file = root.join("var/lib/passos/provisioning-state");
-
-    // Validate all existing values before making any changes.
-    let hostname = read_existing(&hostname_file)?;
-    let id = read_existing(&id_file)?;
-    let state = read_existing(&state_file)?;
+    // Validate existing state before creating or modifying any entries.
+    let hostname = read_existing(etc.as_ref(), "hostname")?;
+    let id = read_existing(state_dir.as_ref(), "device-id")?;
+    let state = read_existing(state_dir.as_ref(), "provisioning-state")?;
 
     if let Some(ref existing) = id
         && !valid_uuid(existing)
@@ -186,34 +195,34 @@ fn initialize(root: &Path) -> io::Result<Device> {
     let hostname = match hostname {
         Some(existing) => existing,
         None => {
-            fs::create_dir_all(root.join("etc"))?;
-            reject_symlinks(&root, "etc/hostname")?;
-            let generated = generate_hostname()?;
-            write_new(&hostname_file, &generated, 0o644)?;
-            generated
+            let directory = open_directory(&root_fd, &["etc"], true)?
+                .ok_or_else(|| io::Error::other("Unable to open etc"))?;
+            let value = generate_hostname()?;
+            write_new(&directory, "hostname", &value, 0o644)?;
+            value
         }
     };
 
     let id = match id {
         Some(existing) => existing,
         None => {
-            fs::create_dir_all(root.join("var/lib/passos"))?;
-            reject_symlinks(&root, "var/lib/passos/device-id")?;
-            let generated = random_uuid()?;
-            write_new(&id_file, &generated, 0o600)?;
-            generated
+            let directory = open_directory(&root_fd, &["var", "lib", "passos"], true)?
+                .ok_or_else(|| io::Error::other("Unable to open state directory"))?;
+            let value = random_uuid()?;
+            write_new(&directory, "device-id", &value, 0o600)?;
+            value
         }
     };
 
     let state = match state {
         Some(existing) => existing,
         None => {
-            reject_symlinks(&root, "var/lib/passos/provisioning-state")?;
-            write_new(&state_file, "unclaimed", 0o600)?;
+            let directory = open_directory(&root_fd, &["var", "lib", "passos"], true)?
+                .ok_or_else(|| io::Error::other("Unable to open state directory"))?;
+            write_new(&directory, "provisioning-state", "unclaimed", 0o600)?;
             "unclaimed".to_owned()
         }
     };
-
     Ok(Device {
         hostname,
         id,
@@ -347,6 +356,33 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(!root.join("etc/hostname").exists());
         cleanup(root);
+    }
+
+    #[test]
+    fn creates_private_state_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_root();
+        initialize(&root).expect("initialize");
+        for name in ["device-id", "provisioning-state"] {
+            let metadata = fs::metadata(root.join("var/lib/passos").join(name)).unwrap();
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        }
+        cleanup(root);
+    }
+
+    #[test]
+    fn rejects_symlinked_etc_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_root();
+        let external = test_root();
+        symlink(&external, root.join("etc")).unwrap();
+        let error = initialize(&root).expect_err("must not follow etc symlink");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!external.join("hostname").exists());
+        cleanup(root);
+        cleanup(external);
     }
 
     #[test]
