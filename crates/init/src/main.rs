@@ -104,7 +104,7 @@ fn write_new(path: &Path, value: &str, mode: u32) -> io::Result<()> {
         random_uuid()?
     ));
 
-    let result = (|| {
+    let result: io::Result<()> = (|| {
         let mut file = OpenOptions::new().write(true).create_new(true).open(&temp)?;
         file.set_permissions(fs::Permissions::from_mode(mode))?;
         file.write_all(format!("{value}\n").as_bytes())?;
